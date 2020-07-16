@@ -1,6 +1,7 @@
 import bs4
 import base64
 import pandas
+import re
 import requests
 import rsa
 import time
@@ -11,6 +12,9 @@ def timestamp():
 
 
 class ScnuJwxtLoginForm:
+    class InvalidAccountOrPasswordError(Exception):
+        pass
+
     def __init__(self):
         self.username = ""
         self.password = ""
@@ -44,9 +48,11 @@ class ScnuJwxtLoginForm:
         # 3、公钥加密密码
         enpsw = ScnuJwxtLoginForm.hextob64(rsa.encrypt(self.password.encode('utf-8'), pub_key))
         # 4、登录
-        self.session.post(f'https://jwxt.scnu.edu.cn/xtgl/login_slogin.html?time={self.time}', headers={
+        resp = self.session.post(f'https://jwxt.scnu.edu.cn/xtgl/login_slogin.html?time={self.time}', headers={
             'Content-Type': 'application/x-www-form-urlencoded'
         }, data=[('csrftoken', csrftoken), ('yhm', self.username), ('mm', enpsw), ('mm', enpsw)])
+        if re.match('用户名或密码不正确', resp.text):
+            raise ScnuJwxtLoginForm.InvalidAccountOrPasswordError
 
 
 class ScnuJwxt:
@@ -55,7 +61,8 @@ class ScnuJwxt:
         self.session = sjlf.session
 
     def query_all_score(self):
-        fi = {'cj': ['成绩', int], 'xf': ['学分', float], 'jd': ['绩点', float], 'kcmc': ['课程名称', str], 'jsxm': ['教师姓名', str]}
+        fi = {'xnmmc': ['学年', str], 'xqmmc': ['学期', int], 'cj': ['成绩', int], 'xf': ['学分', float], 'jd': ['绩点', float],
+              'kcmc': ['课程名称', str], 'jsxm': ['教师姓名', str]}
         a = zip(*fi.values())
         resp = self.session.post('https://jwxt.scnu.edu.cn/cjcx/cjcx_cxDgXscj.html?doType=query&gnmkdm=N305005', data={
             'xnm': '',
@@ -74,9 +81,11 @@ class ScnuJwxt:
 
 
 def run():
+    import sys
     sjlf = ScnuJwxtLoginForm()
     sjlf.username = input('用户名：')
     sjlf.password = input('密码：')
+    print('2')
     sjlf.login()
     sj = ScnuJwxt(sjlf)
     df = sj.query_all_score()
