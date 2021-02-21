@@ -1,6 +1,6 @@
 import bs4
 import base64
-import pandas
+import pandas as pd
 import re
 import requests
 import rsa
@@ -36,17 +36,20 @@ class ScnuJwxtLoginForm:
     # 用户登录
     def login(self):
         # 1、访问页面，获取csrftoken
-        resp = self.session.get('https://jwxt.scnu.edu.cn/xtgl/login_slogin.html')
+        resp = self.session.get(
+            'https://jwxt.scnu.edu.cn/xtgl/login_slogin.html')
         soup = bs4.BeautifulSoup(resp.text, "lxml")
         csrftoken = soup.find('input', id='csrftoken')['value']
         # 2、获取密钥信息
         rsa_key_info = self.session.get(
             f'https://jwxt.scnu.edu.cn/xtgl/login_getPublicKey.html?time={self.time}').json()
         modulus = int(ScnuJwxtLoginForm.b64tohex(rsa_key_info['modulus']), 16)
-        exponent = int(ScnuJwxtLoginForm.b64tohex(rsa_key_info['exponent']), 16)
+        exponent = int(ScnuJwxtLoginForm.b64tohex(
+            rsa_key_info['exponent']), 16)
         pub_key = rsa.PublicKey(modulus, exponent)
         # 3、公钥加密密码
-        enpsw = ScnuJwxtLoginForm.hextob64(rsa.encrypt(self.password.encode('utf-8'), pub_key))
+        enpsw = ScnuJwxtLoginForm.hextob64(
+            rsa.encrypt(self.password.encode('utf-8'), pub_key))
         # 4、登录
         resp = self.session.post(f'https://jwxt.scnu.edu.cn/xtgl/login_slogin.html?time={self.time}', headers={
             'Content-Type': 'application/x-www-form-urlencoded'
@@ -61,9 +64,6 @@ class ScnuJwxt:
         self.session = sjlf.session
 
     def query_all_score(self):
-        fi = {'xnmmc': ['学年', str], 'xqmmc': ['学期', int], 'cj': ['成绩', int], 'xf': ['学分', float], 'jd': ['绩点', float],
-              'kcmc': ['课程名称', str], 'jsxm': ['教师姓名', str]}
-        a = zip(*fi.values())
         resp = self.session.post('https://jwxt.scnu.edu.cn/cjcx/cjcx_cxDgXscj.html?doType=query&gnmkdm=N305005', data={
             'xnm': '',
             'xqm': '',
@@ -74,23 +74,60 @@ class ScnuJwxt:
             'queryModel.sortName': '',
             'queryModel.sortOrder': 'asc',
             'time': 1
-        }).json()
-        li = [list(list(zip(*fi.values()))[0])]
-        li.extend([[v[1](it[k]) for k, v in fi.items() if it.get(k) is not None] for it in resp['items']])
-        return pandas.DataFrame(li)
+        })
+        json_ = resp.json()
+        df = pd.DataFrame()
+        # 转换成dataframe
+        for i, item in enumerate(json_['items']):
+            for k, v in item.items():
+                # 把可计算类型的值转换成对应类型
+                if k in ['cj', 'xnm', 'xqm', 'xqmmc']:
+                    v = int(v)
+                elif k in ['jd', 'xf', 'xfjd']:
+                    v = float(v)
+                elif isinstance(v, dict):
+                    continue
+                df.loc[i, k] = v
+        # 计算学期数
+        df['xqs'] = (df['xnm'] - df['xnm'].min()) * 2 + df['xqmmc']
+        return df
 
 
-def run():
+def gpa(df: pd.DataFrame, terms):
+    test = False
+    for term in terms:
+        test = test | (df['xqs'] == term)
+    filter_result = df[test]
+    return filter_result['xfjd'].sum() / filter_result['xf'].sum()
+
+
+def gpas(df: pd.DataFrame):
+    xqs = df['xqs'].unique()
+    every_term = {}
+    for xq in xqs:
+        every_term[int(xq)] = gpa(df, (xq,))
+    every_year = {}
+    for i in range(len(xqs) // 2):
+        every_year[i + 1] = gpa(df, (2*i+1, 2*i+2))
+    total = gpa(df, xqs)
+    return every_term, every_year, total
+
+
+def main():
     import sys
     sjlf = ScnuJwxtLoginForm()
     sjlf.username = input('用户名：')
     sjlf.password = input('密码：')
-    print('2')
     sjlf.login()
     sj = ScnuJwxt(sjlf)
     df = sj.query_all_score()
-    print(df)
+    every_term, every_year, total = gpas(df)
+    print('每学期绩点：')
+    print(every_term)
+    print('每学年绩点')
+    print(every_year)
+    print('总绩点：', total)
 
 
 if __name__ == '__main__':
-    run()
+    main()
