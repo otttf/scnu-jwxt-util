@@ -127,6 +127,12 @@ def main():
     print('每学年绩点')
     print(every_year)
     print('总绩点：', total)
+    range_size = 10
+    cj = df['cj']
+    for a in range(0, 100, range_size):
+        b = a + range_size - 1
+        print(f'{a}-{b}分的科目的数量：', ((a <= cj) & (cj <= b)).sum())
+    print('100分科目的数量：', (cj == 100).sum())
 
 
 if __name__ == '__main__':
